@@ -1,196 +1,116 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
-
+import { createContext, useContext, useEffect, useState, useCallback } from "react"
 import { authAPI } from "../lib/api"
 
 const AuthContext = createContext()
 
-// Standardized localStorage keys
 const STORAGE_KEYS = {
   TOKEN: "jwt_token",
-  USER: "user_data", 
-  AUTHENTICATED: "isAuthenticated"
+  USER: "user_data",
 }
 
-// Utility function to clear all auth data
+// ---------- Utils ----------
 const clearAuthData = () => {
   localStorage.removeItem(STORAGE_KEYS.TOKEN)
   localStorage.removeItem(STORAGE_KEYS.USER)
-  localStorage.removeItem(STORAGE_KEYS.AUTHENTICATED)
-  localStorage.removeItem("access_token")
-  localStorage.removeItem("auth_token")
 }
 
-// Utility function to validate JWT token
-const validateToken = (token) => {
+const decodeJWT = (token) => {
   try {
-    if (!token) return false
-    
-    // Simple JWT format validation
-    const parts = token.split('.')
-    if (parts.length !== 3) {
-      console.log("Invalid token format")
-      return false
-    }
-    
-    // Decode payload to check expiration
-    const payload = JSON.parse(atob(parts[1]))
-    const currentTime = Math.floor(Date.now() / 1000)
-    
-    // Check if token is expired
-    if (payload.exp && payload.exp < currentTime) {
-      console.log("Token expired")
-      return false
-    }
-    
-    // Additional validation: check if token has required fields
-    if (!payload.sub && !payload.email) {
-      console.log("Token missing required fields")
-      return false
-    }
-    
-    console.log("Token is valid")
-    return true
-  } catch (error) {
-    console.error("Token validation error:", error)
-    return false
+    const base64Url = token.split(".")[1]
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/")
+    return JSON.parse(
+      decodeURIComponent(
+        atob(base64)
+          .split("")
+          .map(c => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+          .join("")
+      )
+    )
+  } catch {
+    return null
   }
 }
 
+const validateToken = (token) => {
+  const payload = decodeJWT(token)
+  if (!payload) return false
+
+  const now = Math.floor(Date.now() / 1000)
+  if (payload.exp && payload.exp < now) return false
+
+  return true
+}
+
+// ---------- Provider ----------
 export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Initialize authentication state
-  const initializeAuth = useCallback(async () => {
+  const initializeAuth = useCallback(() => {
     try {
       setLoading(true)
-      
-      const token = localStorage.getItem(STORAGE_KEYS.TOKEN) || 
-                   localStorage.getItem("access_token") || 
-                   localStorage.getItem("auth_token")
-      const userStr = localStorage.getItem(STORAGE_KEYS.USER)
-      const isAuthStr = localStorage.getItem(STORAGE_KEYS.AUTHENTICATED)
 
-      if (token && userStr && isAuthStr === "true") {
-        // Validate token
-        const isValidToken = validateToken(token)
-        
-        if (isValidToken) {
-          const userData = JSON.parse(userStr)
-          setUser(userData)
-          setIsAuthenticated(true)
-          console.log("Auth initialized: User authenticated")
-        } else {
-          // Token is invalid, clear all auth data
-          console.log("Stored token is invalid, clearing auth data")
-          clearAuthData()
-          setUser(null)
-          setIsAuthenticated(false)
-        }
-      } else {
-        // No valid auth data found
-        setUser(null)
+      const token = localStorage.getItem(STORAGE_KEYS.TOKEN)
+      const userStr = localStorage.getItem(STORAGE_KEYS.USER)
+
+      if (!token || !validateToken(token)) {
+        clearAuthData()
         setIsAuthenticated(false)
+        setUser(null)
+        return
       }
-    } catch (error) {
-      console.error("Error initializing auth:", error)
-      // Clear invalid data
+
+      setIsAuthenticated(true)
+      setUser(userStr ? JSON.parse(userStr) : null)
+    } catch {
       clearAuthData()
-      setUser(null)
       setIsAuthenticated(false)
+      setUser(null)
     } finally {
       setLoading(false)
     }
   }, [])
 
-  // Initialize on mount
   useEffect(() => {
     initializeAuth()
   }, [initializeAuth])
 
   const login = async (email, password) => {
-    try {
-      console.log("Attempting login...")
-      const response = await authAPI.login(email, password)
-      
-      // Ensure we have the token and user data
-      if (!response.token && !response.access_token) {
-        throw new Error("Authentication failed: No token received")
-      }
-      
-      // Use consistent token storage
-      const authToken = response.token || response.access_token
-      
-      // Store authentication data with standardized keys
-      localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, "true")
-      localStorage.setItem(STORAGE_KEYS.TOKEN, authToken)
-      
-      // Handle user data consistently
-      const userData = response.user || { email, name: "User" }
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(userData))
-      
-      // Update state
-      setUser(userData)
-      setIsAuthenticated(true)
-      
-      console.log("Login successful:", { user: userData, hasToken: !!authToken })
-      return { success: true, user: userData }
-    } catch (error) {
-      console.error("Login failed:", error)
-      // Clear any existing auth data on failed login
-      clearAuthData()
-      setUser(null)
-      setIsAuthenticated(false)
-      return { success: false, error: error.message || "Login failed" }
-    }
+    const response = await authAPI.login(email, password)
+
+    const token = response.token ?? response.access_token
+    if (!token) throw new Error("No token received")
+
+    localStorage.setItem(STORAGE_KEYS.TOKEN, token)
+
+    const userData = response.user ?? { email }
+    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(userData))
+
+    setUser(userData)
+    setIsAuthenticated(true)
   }
 
   const logout = () => {
-    try {
-      console.log("Logging out...")
-      
-      // Clear authentication data
-      clearAuthData()
-      
-      // Update state
-      setUser(null)
-      setIsAuthenticated(false)
-      
-      // Clear auth API state
-      if (authAPI.logout) {
-        authAPI.logout()
-      }
-      
-      console.log("Logout successful")
-    } catch (error) {
-      console.error("Error during logout:", error)
-    }
-  }
-
-  // Refresh auth state (useful for debugging or manual refresh)
-  const refreshAuth = () => {
-    initializeAuth()
-  }
-
-  const value = {
-    isAuthenticated,
-    user,
-    loading,
-    login,
-    logout,
-    refreshAuth
+    clearAuthData()
+    setUser(null)
+    setIsAuthenticated(false)
+    authAPI.logout?.()
   }
 
   return (
-    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+    <AuthContext.Provider
+      value={{ isAuthenticated, user, loading, login, logout }}
+    >
+      {children}
+    </AuthContext.Provider>
   )
 }
 
 export function useAuth() {
   const context = useContext(AuthContext)
   if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider")
+    throw new Error("useAuth must be used inside AuthProvider")
   }
   return context
 }

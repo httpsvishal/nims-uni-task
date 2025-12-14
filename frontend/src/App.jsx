@@ -1,6 +1,6 @@
-
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom"
 import { Toaster } from "sonner"
+
 import { ThemeProvider } from "./contexts/ThemeContext"
 import { AuthProvider, useAuth } from "./contexts/AuthContext"
 
@@ -10,19 +10,50 @@ import StudentList from "./pages/StudentList"
 import StudentForm from "./pages/StudentForm"
 import Reports from "./pages/Reports"
 
+// ---------- Private Route ----------
+
 function PrivateRoute({ children }) {
-  const { isAuthenticated } = useAuth()
-  console.log("PrivateRoute - isAuthenticated:", isAuthenticated)
-  return isAuthenticated ? children : <Navigate to="/login" />
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        Loading...
+      </div>
+    )
+  }
+
+  return isAuthenticated ? children : <Navigate to="/login" replace />
 }
 
+
+// ---------- Public Route ----------
+function PublicRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) return null
+
+  return isAuthenticated ? <Navigate to="/dashboard" replace /> : children
+}
+
+// ---------- App ----------
 function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
         <Router>
           <Routes>
-            <Route path="/login" element={<Login />} />
+            {/* Public */}
+            <Route
+              path="/login"
+              element={
+                <PublicRoute>
+                  <Login />
+                </PublicRoute>
+              }
+            />
+
+            {/* Protected */}
             <Route
               path="/dashboard"
               element={
@@ -31,6 +62,7 @@ function App() {
                 </PrivateRoute>
               }
             />
+
             <Route
               path="/students"
               element={
@@ -39,6 +71,7 @@ function App() {
                 </PrivateRoute>
               }
             />
+
             <Route
               path="/students/new"
               element={
@@ -56,6 +89,7 @@ function App() {
                 </PrivateRoute>
               }
             />
+
             <Route
               path="/reports"
               element={
@@ -64,9 +98,12 @@ function App() {
                 </PrivateRoute>
               }
             />
-            <Route path="/" element={<Navigate to="/dashboard" />} />
+
+            {/* Default */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </Router>
+
         <Toaster position="top-right" richColors />
       </AuthProvider>
     </ThemeProvider>
